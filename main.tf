@@ -2,11 +2,11 @@ terraform {
   required_version = ">= 1.5.0"
 
   backend "s3" {
-    bucket         = "expensetrack-tfstate-927161113926-eu-west-2-an"
-    key            = "expense-tracker/dev.tfstate"
-    region         = "eu-west-2"
+    bucket       = "expensetrack-tfstate-927161113926-eu-west-2-an"
+    key          = "expense-tracker/dev.tfstate"
+    region       = "eu-west-2"
     use_lockfile = true
-    encrypt        = true
+    encrypt      = true
   }
 
   required_providers {
@@ -55,6 +55,14 @@ resource "aws_security_group" "app" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  ingress {
+    description = "HTTPS from anywhere"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   egress {
     description = "Allow all outbound"
     from_port   = 0
@@ -77,6 +85,7 @@ resource "aws_instance" "app" {
   ami                    = var.ami_id
   instance_type          = var.instance_type
   vpc_security_group_ids = [aws_security_group.app.id]
+  iam_instance_profile   = aws_iam_instance_profile.app.name
   key_name               = aws_key_pair.deployer.key_name
 
   tags = {
@@ -106,4 +115,42 @@ resource "aws_budgets_budget" "monthly" {
   }
 
   depends_on = [aws_security_group.app]
+}
+
+resource "aws_iam_role" "app" {
+  name = "expense-tracker-app-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Sid       = ""
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+
+  tags = {
+    project    = "expensetrack"
+    owner      = "hadya"
+    managed_by = "terraform"
+  }
+}
+
+resource "aws_iam_instance_profile" "app" {
+  name = "expense-tracker-app-profile"
+  role = aws_iam_role.app.name
+}
+
+data "aws_iam_policy_document" "app_secrets" {
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = ["arn:aws:secretsmanager:eu-west-2:927161113926:secret:expensetrack/app07860-HDHU2X"]
+  }
+}
+
+resource "aws_iam_role_policy" "app_secrets" {
+  name   = "expense-tracker-read-app-secret"
+  role   = aws_iam_role.app.id
+  policy = data.aws_iam_policy_document.app_secrets.json
 }
